@@ -3,6 +3,8 @@ import {
     Application,
     BaseRenderTexture,
     Container,
+    Filter,
+    Geometry,
     Graphics,
     RenderTexture,
     Matrix,
@@ -13,18 +15,17 @@ import {
     Text,
     Texture,
     settings,
+    Shader,
+    Mesh,
 } from "pixi.js";
-
-
-// settings.FAIL_IF_MAJOR_PERFORMANCE_CAVEAT = true;
 
 
 const WIDTH = window.innerWidth;
 const HEIGHT = window.innerHeight;
-const CELL_SIZE = 5;
+const CELL_SIZE = 6;
 const WORLD_WIDTH = Math.ceil(WIDTH/CELL_SIZE);
 const WORLD_HEIGHT = Math.ceil(HEIGHT/CELL_SIZE);
-const GRAVITY = 0.1;
+const WORLD_SIZE = WORLD_WIDTH * WORLD_HEIGHT;
 
 
 const app = new Application({
@@ -32,17 +33,12 @@ const app = new Application({
     width: WIDTH,
     height: HEIGHT,
 });
-// @ts-expect-error
-document.body.appendChild(app.view);
+document.body.appendChild(app.view as unknown as Node);
 
-const container = new Container();
-// const container = new ParticleContainer(WIDTH*HEIGHT, {
-//     scale: true,
-//     position: true,
-//     rotation: false,
-//     uvs: false,
-//     alpha: false,
-// });
+const container = new ParticleContainer(WORLD_SIZE, {
+    tint: true,
+    
+}, 16383);
 app.stage.addChild(container);
 
 
@@ -62,11 +58,11 @@ interface Cell {
 }
 
 
-const buffer: Cell[] = new Array(WORLD_WIDTH*WORLD_HEIGHT).fill(0).map((_, i) => {
+const world: Cell[] = new Array(WORLD_SIZE).fill(0).map((_, i) => {
     const sprite = new Sprite(Texture.WHITE);
     
-    sprite.x = (i%WORLD_WIDTH)     * CELL_SIZE;
-    sprite.y = ((i/WORLD_WIDTH)|0) * CELL_SIZE;
+    sprite.x = (i%WORLD_WIDTH)   * CELL_SIZE;
+    sprite.y = (i/WORLD_WIDTH|0) * CELL_SIZE;
 
     sprite.width = CELL_SIZE;
     sprite.height = CELL_SIZE;
@@ -79,67 +75,83 @@ const buffer: Cell[] = new Array(WORLD_WIDTH*WORLD_HEIGHT).fill(0).map((_, i) =>
         sprite,
     };
 });
-let types = buffer.map(({ type }) => type);
+let types = world.map(({ type }) => type);
 
 
 function is_empty(i: number) {
     return i > 0
-        && i < WORLD_WIDTH*WORLD_HEIGHT
-        && buffer[i].type === CellType.Air;
+        && i < WORLD_SIZE
+        && types[i] === CellType.Air;
 }
 function swap(a: number, b: number) {
-    types[a] = buffer[b].type;
-    types[b] = buffer[a].type;
+    const temp = world[a];
+
+    world[a].sprite.x = (b%WORLD_WIDTH)   * CELL_SIZE;
+    world[a].sprite.y = (b/WORLD_WIDTH|0) * CELL_SIZE;
+    world[a] = world[b];
+
+    world[b].sprite.x = (a%WORLD_WIDTH)   * CELL_SIZE;
+    world[b].sprite.y = (a/WORLD_WIDTH|0) * CELL_SIZE;
+    world[b] = temp;
 }
 
-setInterval(() => {
-    for (let i = buffer.length-1; i > 0; i --) {
-        if (buffer[i].type === CellType.Sand) {
-            // buffer[i].vel.y += GRAVITY;
 
-            const down = i+WORLD_WIDTH;
-            // const left = i-1;
-            // const right = i+1;
-            const down_left = i+WORLD_WIDTH-1;
-            const down_right = i+WORLD_WIDTH+1;
+let lastFrame = Date.now();
+let delta = 0;
+setInterval(function physics() {
+    delta = Date.now()-lastFrame;
+    lastFrame = Date.now();
 
-            if (is_empty(down)) { swap(down, i); }
-            else if (is_empty(down_left)) { swap(down_left, i); }
-            else if (is_empty(down_right)) { swap(down_right, i); }
-        }
-    }
-    for (let i = buffer.length-1; i > 0; i --) {
-        buffer[i].type = types[i];
-    }
-}, 1000/120);
-
-app.ticker.add((delta: number) => {
     if (mouse.is_pressed) {
-        for (let i = 0; i < 10; i ++) {
-            const r = Math.random() * Math.PI*2;
-            const d = Math.random() * 25;
+        spawn_sand(mouse.x, mouse.y, 50);
+    }
+    
+    for (let i = world.length-1; i > 0; i --) {
+        types[i] = world[i].type;
+    }
 
-            const rx = mouse.x + Math.cos(r) * d;
-            const ry = mouse.y + Math.sin(r) * d;
+    for (let i = world.length-1; i > 0; i --) {
+        if (types[i] === CellType.Sand) {
+            world[i].vel.y += delta / 100;
 
-            const x = (rx/CELL_SIZE) | 0;
-            const y = (ry/CELL_SIZE) | 0;
-            const index = x + y*WORLD_WIDTH;
+            const pos_y = WORLD_WIDTH * (world[i].vel.y|0 + 1);
             
-            buffer[index].type = CellType.Sand;
+            const down = i + pos_y;
+            const down_left = i + pos_y - 1;
+            const down_right = i + pos_y + 1;
+
+            if (is_empty(down)) {
+                swap(down, i);
+            } else if (is_empty(down_left)) {
+                swap(down_left, i);
+            } else if (is_empty(down_right)) {
+                swap(down_right, i);
+            } else {
+                world[i].vel.y = 0;
+            }
         }
     }
+}, 1000/60);
 
-    for (let i = 0; i < buffer.length; i ++) {
-        if (buffer[i].type === CellType.Sand) {
-            buffer[i].sprite.tint = 0xc4ab5e;
-        } else if (buffer[i].type === CellType.Air) {
-            buffer[i].sprite.tint = 0xffffff;
+
+function spawn_sand(mouse_x: number, mouse_y: number, amount: number) {
+    for (let i = 0; i < amount; i ++) {
+        const r = Math.random() * Math.PI*2;
+        const d = Math.random() * 40;
+
+        const rx = mouse_x + Math.cos(r) * d;
+        const ry = mouse_y + Math.sin(r) * d;
+
+        const x = rx/CELL_SIZE | 0;
+        const y = ry/CELL_SIZE | 0;
+        const index = x + y*WORLD_WIDTH;
+        
+        if (is_empty(index)) {
+            world[index].type = CellType.Sand;
+            world[index].sprite.tint = 0xc4ab5e;
         }
     }
-});
-
-
+}
 
 
 const mouse = {
