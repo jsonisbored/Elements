@@ -1,0 +1,17 @@
+{
+  "name": "elements",
+  "source": "src/index.html",
+  "scripts": {
+    "start": "parcel",
+    "build": "parcel build"
+  },
+  "devDependencies": {
+    "parcel": "latest",
+    "punycode": "^1.4.1",
+    "querystring-es3": "^0.2.1"
+  },
+  "dependencies": {
+    "pixi.js": "^7.2.4",
+    "two.js": "^0.8.10"
+  }
+}
